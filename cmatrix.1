@@ -1,11 +1,18 @@
-.TH CMatrix 1 "Mon May 3 1999"
+.TH NCMatrix 1 "October 2026"
 .SH NAME
-CMatrix
+NCMatrix \- CMatrix with network traffic in the rain
 .SH SYNOPSIS
-.B cmatrix
-[\-abBflohnsmVx] [\-u update] [\-C color]
+.B ncmatrix
+[\-abBflohnsmNVx] [\-u update] [\-C color] [\-I interface] [\-H updates]
+[\-R color] [\-T color]
 .SH DESCRIPTION
-Shows a scrolling 'Matrix' like screen in Linux
+Shows a scrolling 'Matrix' like screen. Packets the computer sends and
+receives are painted into the rain as bold runs, red for sent and magenta
+for received by default, so the screen shows the network's traffic.
+.PP
+NCMatrix is CMatrix by Chris Allegretta, Abishek V Ashok and the CMatrix
+contributors, with the network display of NCMatrix 1.0 (2005) by Thomas
+Bloedorn, carried over to current CMatrix.
 .SS OPTIONS
 .TP
 .I "\-a"
@@ -68,6 +75,23 @@ Add a message in the center of cmatrix
 .TP
 .I "\-t tty"
 Set tty to use
+.TP
+.I "\-I interface"
+Show the traffic of this network interface only (Linux and macOS: its name,
+such as wlan0 or en0; Windows: the name Windows shows, such as Wi-Fi).
+Default: every interface but loopback
+.TP
+.I "\-H updates"
+Screen updates between readings of the packet counters, default 4
+.TP
+.I "\-R color"
+Color for received packets (default magenta)
+.TP
+.I "\-T color"
+Color for transmitted packets (default red)
+.TP
+.I "\-N"
+No network display
 .SS KEYSTROKES
 The following keystrokes are available during execution (unavailable in
 \-s mode)
@@ -92,10 +116,15 @@ Change the color of the matrix to the corresponding color:
 ! \- red, @ \- green, # \- yellow, $ \- blue, % \- magenta, ^ \- cyan,
 & \- white, ) \- black.
 .TP
+.I "N"
+Turn the network display off and on
+.TP
 .I "q"
 Quit the program
 .SH BUGS
 This program is very CPU intensive.  Don't be surprised if it eats up over
 40% of your CPU at times.
 .SH HOMEPAGE
-http://www.github.com/abishekvashok/cmatrix
+CMatrix: https://github.com/abishekvashok/cmatrix
+.br
+NCMatrix 1.0: http://webpages.charter.net/tux/ncmatrix/ (archived)

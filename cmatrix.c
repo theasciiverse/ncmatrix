@@ -3,6 +3,8 @@
 
     Copyright (C) 1999-2017 Chris Allegretta
     Copyright (C) 2017-Present Abishek V Ashok
+    Copyright (C) 2005 Thomas Bloedorn (the network display, from his
+    NCMatrix 1.0, GPL version 1 or later)
 
     This file is part of cmatrix.
 
@@ -34,9 +36,17 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <locale.h>
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#include <sys/socket.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2ipdef.h> /* before iphlpapi.h, for GetIfTable2 */
 #include <windows.h>
+#include <iphlpapi.h>
 #endif
 
 #ifndef EXCLUDE_CONFIG_H
@@ -79,6 +89,8 @@
 typedef struct cmatrix {
     int val;
     bool is_head;
+    int color;  /* NCMatrix: a traffic colour, 0 for the rain's own */
+    bool net;   /* NCMatrix: painted by network traffic, drawn bold */
 } cmatrix;
 
 /* Global variables */
@@ -92,6 +104,15 @@ int *updates = NULL; /* What does this do again? */
 #ifndef _WIN32
 volatile sig_atomic_t signal_status = 0; /* Indicates a caught signal */
 #endif
+
+/* NCMatrix: the network display, after Thomas Bloedorn's NCMatrix 1.0
+ * (2005). Packets sent and received since the last reading are painted
+ * into the rain as bold runs, in the transmit and receive colours. */
+int net_on = 1;
+char *net_nic = NULL;      /* NULL: every interface but loopback */
+int net_poll = 4;          /* screen updates between readings */
+int tx_color = COLOR_RED;
+int rx_color = COLOR_MAGENTA;
 
 int va_system(char *str, ...) {
 
@@ -147,7 +168,8 @@ void c_die(char *msg, ...) {
 }
 
 void usage(void) {
-    printf(" Usage: cmatrix -[abBcfhlsmVxk] [-u delay] [-C color] [-t tty] [-M message]\n");
+    printf(" Usage: ncmatrix -[abBcfhlsmNVxk] [-u delay] [-C color] [-t tty] [-M message]\n");
+    printf("                 [-I interface] [-H updates] [-R color] [-T color]\n");
     printf(" -a: Asynchronous scroll\n");
     printf(" -b: Bold characters on\n");
     printf(" -B: All bold characters (overrides -b)\n");
@@ -168,13 +190,148 @@ void usage(void) {
     printf(" -m: lambda mode\n");
     printf(" -k: Characters change while scrolling. (Works without -o opt.)\n");
     printf(" -t [tty]: Set tty to use\n");
+    printf(" -I [interface]: Show this network interface's traffic (default: all but loopback)\n");
+    printf(" -H [updates]: Screen updates between network readings (default 4)\n");
+    printf(" -R [color]: Color for received packets (default magenta)\n");
+    printf(" -T [color]: Color for transmitted packets (default red)\n");
+    printf(" -N: No network display (N while running turns it off and on)\n");
 }
 
 void version(void) {
-    printf(" CMatrix version %s (compiled %s, %s)\n",
+    printf(" NCMatrix version %s (compiled %s, %s)\n",
         VERSION, __TIME__, __DATE__);
-    printf("Email: abishekvashok@gmail.com\n");
-    printf("Web: https://github.com/abishekvashok/cmatrix\n");
+    printf("CMatrix by Chris Allegretta, Abishek V Ashok and contributors:\n");
+    printf("  https://github.com/abishekvashok/cmatrix\n");
+    printf("Network display from NCMatrix 1.0 (2005) by Thomas Bloedorn\n");
+}
+
+/* A colour by name, or -1 */
+int color_by_name(const char *name) {
+    static const struct { const char *name; int color; } colors[] = {
+        {"green", COLOR_GREEN}, {"red", COLOR_RED}, {"blue", COLOR_BLUE},
+        {"white", COLOR_WHITE}, {"yellow", COLOR_YELLOW}, {"cyan", COLOR_CYAN},
+        {"magenta", COLOR_MAGENTA}, {"black", COLOR_BLACK},
+    };
+    size_t k;
+    for (k = 0; k < sizeof(colors) / sizeof(colors[0]); k++) {
+        if (!strcasecmp(name, colors[k].name)) {
+            return colors[k].color;
+        }
+    }
+    return -1;
+}
+
+/* NCMatrix: the packets sent and received so far, summed over net_nic or
+ * every interface but loopback. Returns 0 if they cannot be read. */
+int net_counters(unsigned long long *tx, unsigned long long *rx) {
+    *tx = *rx = 0;
+#if defined(__linux__)
+    /* /proc/net/dev: "name: rx bytes packets errs drop fifo frame
+     * compressed multicast, tx bytes packets ..." */
+    char line[512];
+    int found = 0;
+    FILE *f = fopen("/proc/net/dev", "r");
+    if (!f) {
+        return 0;
+    }
+    while (fgets(line, sizeof(line), f)) {
+        char *colon = strchr(line, ':');
+        char *name = line;
+        unsigned long long v[10];
+        if (!colon) {
+            continue;
+        }
+        *colon = '\0';
+        while (*name == ' ') {
+            name++;
+        }
+        if (net_nic ? strcmp(name, net_nic) != 0 : strcmp(name, "lo") == 0) {
+            continue;
+        }
+        if (sscanf(colon + 1, "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7],
+                   &v[8], &v[9]) == 10) {
+            *rx += v[1];
+            *tx += v[9];
+            found = 1;
+        }
+    }
+    fclose(f);
+    return found;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    struct ifaddrs *ifs, *a;
+    int found = 0;
+    if (getifaddrs(&ifs) != 0) {
+        return 0;
+    }
+    for (a = ifs; a; a = a->ifa_next) {
+        struct if_data *d;
+        if (!a->ifa_addr || a->ifa_addr->sa_family != AF_LINK || !a->ifa_data) {
+            continue;
+        }
+        if (net_nic ? strcmp(a->ifa_name, net_nic) != 0 : (a->ifa_flags & IFF_LOOPBACK) != 0) {
+            continue;
+        }
+        d = (struct if_data *) a->ifa_data;
+        *rx += d->ifi_ipackets;
+        *tx += d->ifi_opackets;
+        found = 1;
+    }
+    freeifaddrs(ifs);
+    return found;
+#elif defined(_WIN32)
+    /* real network cards only: Windows stacks filter interfaces on each
+     * one that repeat its counts; -I takes the name shown in Windows
+     * ("Wi-Fi", "Ethernet") */
+    MIB_IF_TABLE2 *table;
+    ULONG k;
+    int found = 0;
+    if (GetIfTable2(&table) != NO_ERROR) {
+        return 0;
+    }
+    for (k = 0; k < table->NumEntries; k++) {
+        MIB_IF_ROW2 *r = &table->Table[k];
+        if (net_nic) {
+            char name[256];
+            if (wcstombs(name, r->Alias, sizeof(name)) == (size_t) -1
+                || strcasecmp(name, net_nic) != 0) {
+                continue;
+            }
+        } else if (r->Type == IF_TYPE_SOFTWARE_LOOPBACK
+                   || !r->InterfaceAndOperStatusFlags.HardwareInterface) {
+            continue;
+        }
+        *rx += r->InUcastPkts + r->InNUcastPkts;
+        *tx += r->OutUcastPkts + r->OutNUcastPkts;
+        found = 1;
+    }
+    FreeMibTable(table);
+    return found;
+#else
+    return 0;
+#endif
+}
+
+/* NCMatrix: paints a run of up to `packets` cells, down from a random cell
+ * that shows a character, in a traffic colour. */
+void net_paint(unsigned long long packets, int color) {
+    int i = 1, j = 0, tries, n;
+    if (packets == 0 || LINES < 1 || COLS < 1) {
+        return;
+    }
+    n = packets > (unsigned long long) LINES ? LINES : (int) packets;
+    /* the rain falls in the even columns; land on a character if we can */
+    for (tries = 0; tries < 8; tries++) {
+        i = rand() % LINES + 1;
+        j = (rand() % ((COLS + 1) / 2)) * 2;
+        if (matrix[i][j].val != ' ' && matrix[i][j].val != -1) {
+            break;
+        }
+    }
+    for (; n > 0 && i <= LINES; n--, i++) {
+        matrix[i][j].color = color;
+        matrix[i][j].net = true;
+    }
 }
 
 
@@ -200,6 +357,7 @@ void var_init() {
 
     matrix = nmalloc(sizeof(cmatrix *) * (LINES + 1));
     matrix[0] = nmalloc(sizeof(cmatrix) * (LINES + 1) * COLS);
+    memset(matrix[0], 0, sizeof(cmatrix) * (LINES + 1) * COLS);
     for (i = 1; i <= LINES; i++) {
         matrix[i] = matrix[i - 1] + COLS;
     }
@@ -333,13 +491,16 @@ int main(int argc, char *argv[]) {
     int changes = 0;
     char *msg = "";
     char *tty = NULL;
+    int net_tick = 0;
+    int net_seen = 0;
+    unsigned long long net_tx = 0, net_rx = 0;
 
     srand((unsigned) time(NULL));
     setlocale(LC_ALL, "");
 
     /* Many thanks to morph- (morph@jmss.com) for this getopt patch */
     opterr = 0;
-    while ((optchr = getopt(argc, argv, "abBcfhlLnrosmxkVM:u:C:t:")) != EOF) {
+    while ((optchr = getopt(argc, argv, "abBcfhlLnrosmxkNVM:u:C:t:I:H:R:T:")) != EOF) {
         switch (optchr) {
         case 's':
             screensaver = 1;
@@ -356,27 +517,32 @@ int main(int argc, char *argv[]) {
             bold = 2;
             break;
         case 'C':
-            if (!strcasecmp(optarg, "green")) {
-                mcolor = COLOR_GREEN;
-            } else if (!strcasecmp(optarg, "red")) {
-                mcolor = COLOR_RED;
-            } else if (!strcasecmp(optarg, "blue")) {
-                mcolor = COLOR_BLUE;
-            } else if (!strcasecmp(optarg, "white")) {
-                mcolor = COLOR_WHITE;
-            } else if (!strcasecmp(optarg, "yellow")) {
-                mcolor = COLOR_YELLOW;
-            } else if (!strcasecmp(optarg, "cyan")) {
-                mcolor = COLOR_CYAN;
-            } else if (!strcasecmp(optarg, "magenta")) {
-                mcolor = COLOR_MAGENTA;
-            } else if (!strcasecmp(optarg, "black")) {
-                mcolor = COLOR_BLACK;
-            } else {
-                c_die(" Invalid color selection\n Valid "
+        case 'R':
+        case 'T': {
+            int color = color_by_name(optarg);
+            if (color < 0) {
+                fprintf(stderr, " Invalid color selection\n Valid "
                        "colors are green, red, blue, "
                        "white, yellow, cyan, magenta " "and black.\n");
+                exit(1);
             }
+            if (optchr == 'C') {
+                mcolor = color;
+            } else if (optchr == 'R') {
+                rx_color = color;
+            } else {
+                tx_color = color;
+            }
+            break;
+        }
+        case 'I':
+            net_nic = optarg;
+            break;
+        case 'H':
+            net_poll = atoi(optarg) < 1 ? 1 : atoi(optarg);
+            break;
+        case 'N':
+            net_on = 0;
             break;
         case 'c':
             classic = 1;
@@ -472,6 +638,8 @@ int main(int argc, char *argv[]) {
 #ifndef _WIN32
     signal(SIGINT, sighandler);
     signal(SIGQUIT, sighandler);
+    signal(SIGTERM, sighandler);
+    signal(SIGHUP, sighandler);
     signal(SIGWINCH, sighandler);
     signal(SIGTSTP, sighandler);
 #endif
@@ -547,6 +715,11 @@ if (console) {
             if (lock != 1)
                 finish();
             /* exits */
+        }
+        /* asked to stop, or the terminal went away: put it back and go,
+         * locked or not */
+        if (signal_status == SIGTERM || signal_status == SIGHUP) {
+            finish();
         }
         if (signal_status == SIGWINCH) {
             resize_screen();
@@ -653,10 +826,28 @@ if (console) {
                 case 'P':
                     pause = (pause == 0)?1:0;
                     break;
+                case 'N':
+                    net_on = !net_on;
+                    break;
 
                 }
             }
         }
+        if (net_on && pause == 0 && ++net_tick >= net_poll) {
+            unsigned long long tx, rx;
+            net_tick = 0;
+            if (net_counters(&tx, &rx)) {
+                /* counters that went back (a reset interface) paint nothing */
+                if (net_seen && tx >= net_tx && rx >= net_rx) {
+                    net_paint(tx - net_tx, tx_color);
+                    net_paint(rx - net_rx, rx_color);
+                }
+                net_tx = tx;
+                net_rx = rx;
+                net_seen = 1;
+            }
+        }
+
         for (j = 0; j <= COLS - 1; j += 2) {
             if ((count > updates[j] || asynch == 0) && pause == 0) {
 
@@ -664,7 +855,11 @@ if (console) {
                 if (oldstyle) {
                     for (i = LINES - 1; i >= 1; i--) {
                         matrix[i][j].val = matrix[i - 1][j].val;
+                        matrix[i][j].color = matrix[i - 1][j].color;
+                        matrix[i][j].net = matrix[i - 1][j].net;
                     }
+                    matrix[0][j].color = 0;
+                    matrix[0][j].net = false;
                     random = (int) rand() % (randnum + 8) + randmin;
 
                     if (matrix[1][j].val == 0) {
@@ -734,11 +929,15 @@ if (console) {
 
                         if (i > LINES) {
                             matrix[z][j].val = ' ';
+                            matrix[z][j].color = 0;
+                            matrix[z][j].net = false;
                             continue;
                         }
 
                         matrix[i][j].val = (int) rand() % randnum + randmin;
                         matrix[i][j].is_head = true;
+                        matrix[i][j].color = 0;
+                        matrix[i][j].net = false;
 
                         /* If we're at the top of the column and it's reached its
                            full length (about to start moving down), we do this
@@ -747,6 +946,8 @@ if (console) {
                          */
                         if (y > length[j] || firstcoldone) {
                             matrix[z][j].val = ' ';
+                            matrix[z][j].color = 0;
+                            matrix[z][j].net = false;
                             matrix[0][j].val = -1;
                         }
                         firstcoldone = 1;
@@ -817,7 +1018,11 @@ if (console) {
                                 break;
                        }
                     }
-                    attron(COLOR_PAIR(mcolor));
+                    int pair = matrix[i][j].color ? matrix[i][j].color : mcolor;
+                    attron(COLOR_PAIR(pair));
+                    if (matrix[i][j].net) {
+                        attron(A_BOLD);
+                    }
                     if (matrix[i][j].val == 1) {
                         if (bold) {
                             attron(A_BOLD);
@@ -857,7 +1062,10 @@ if (console) {
                             attroff(A_ALTCHARSET);
                         }
                     }
-                    attroff(COLOR_PAIR(mcolor));
+                    if (matrix[i][j].net) {
+                        attroff(A_BOLD);
+                    }
+                    attroff(COLOR_PAIR(pair));
                 }
             }
         }
