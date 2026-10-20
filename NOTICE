@@ -1,0 +1,21 @@
+NCMatrix
+
+CMatrix, the scrolling Matrix screen, is by Chris Allegretta (1999 to
+2017) and Abishek V Ashok (2017 on), with the CMatrix contributors named
+in this repository's history and in README.md: github.com/abishekvashok/cmatrix.
+Its thanks list (README.md) names Krisjon Hanson, Bjoern Ganslandt, Adam
+Gurno, Garrick West, nemo, John Donahue, Ben Esacove and others from the
+early years.
+
+The network display, packets sent and received painted into the rain, is
+by Thomas Bloedorn, from his NCMatrix 1.0 (2005), built on CMatrix 1.2a:
+http://webpages.charter.net/tux/ncmatrix/ (archived at the Internet
+Archive), mirrored at github.com/mayfrost/NCMatrix (the `ncmatrix` remote
+here; its one commit is the 1.0 release).
+
+Asciiverse carried Thomas Bloedorn's network display over to current
+CMatrix and packaged it for the Asciiverse catalog (see PATCHES.md).
+
+CMatrix is GPL version 3 or later; NCMatrix 1.0 is GPL version 1 or later,
+which allows it to be used under version 3. The whole is GPL version 3 or
+later (COPYING).

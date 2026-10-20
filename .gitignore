@@ -30,3 +30,10 @@ cmatrix.exe
 *.core
 CMakeCache.txt
 CMakeFiles/
+
+# Asciiverse builds
+build-av/
+build-asan/
+out/
+stage/
+dist/
