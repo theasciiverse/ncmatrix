@@ -1,6 +1,6 @@
 # CMake build system for CMatrix
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.10)
 
 project(CMatrix LANGUAGES C)
 set(VERSION "2.0")
@@ -25,7 +25,11 @@ endif()
 # configure_file(config.h.in config.h)
 
 add_definitions(-DVERSION="${VERSION}")
-if	(NOT WIN32)
+# Screensaver mode (-s) can push the key that ended it back into the
+# terminal. Off here: started from a launcher the key would land in the
+# launcher, and most current kernels refuse TIOCSTI anyway.
+option(NCMATRIX_KEEP_KEY "push the key that ends -s back into the terminal" OFF)
+if	(NOT WIN32 AND NCMATRIX_KEEP_KEY)
 	add_definitions(-DUSE_TIOCSTI)
 endif	()
 
@@ -64,12 +68,12 @@ if (HAVE_USE_DEFAULT_COLORS)
     add_definitions(-DHAVE_USE_DEFAULT_COLORS)
 endif()
 
-add_executable(cmatrix cmatrix.c)
+add_executable(ncmatrix cmatrix.c)
 
-target_link_libraries(cmatrix ${CURSES_LIBRARIES})
+target_link_libraries(ncmatrix ${CURSES_LIBRARIES})
 
-install(TARGETS cmatrix DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES cmatrix.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+install(TARGETS ncmatrix DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES cmatrix.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 RENAME ncmatrix.1)
 
 if     (UNIX)
 	foreach    (CONSOLE_FONTS_DIR ${CONSOLE_FONTS_DIRS})
