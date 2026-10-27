@@ -1,3 +1,16 @@
+> **Play it with Asciiverse.** With [av](https://asciiverse.sh), the Asciiverse
+> client:
+>
+> ```
+> av install ncmatrix
+> av play ncmatrix
+> ```
+>
+> Or download the archive for your system from this repository's Releases,
+> unpack it and run `./ncmatrix` (`ncmatrix.exe` on Windows).
+>
+> The original README follows.
+
 <h1 align="center">CMatrix</h1>
 
 <h3 align="center"> Matrix like effect in your terminal </h3>

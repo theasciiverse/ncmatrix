@@ -77,3 +77,9 @@ Changed in carrying it over:
   Windows build, run under Wine 10 with the host's network, draws, shows
   traffic for all interfaces and for `-I wlp6s0`, and q quits with status
   0; real Windows is unchecked. macOS not built here.
+
+## Ours
+
+- **How to play it, at the top of README.md.** A short note on installing and
+  starting it with av, or from a release archive; the original text follows
+  unchanged.
