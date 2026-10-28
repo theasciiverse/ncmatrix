@@ -6,9 +6,6 @@
 > av play ncmatrix
 > ```
 >
-> Or download the archive for your system from this repository's Releases,
-> unpack it and run `./ncmatrix` (`ncmatrix.exe` on Windows).
->
 > The original README follows.
 
 <h1 align="center">CMatrix</h1>
